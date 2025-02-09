@@ -63,7 +63,7 @@ namespace LanguageBot.Games
         // Метод для получения текущего состояния игры
         public string GetCurrentState()
         {
-            return $"Слово: {_guessedWord}\nОсталось попыток: {_attemptsLeft}";
+            return $"Осталось попыток: {_attemptsLeft}";
         }
 
         public static class HangmanGames
