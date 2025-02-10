@@ -2,10 +2,13 @@
 using LanguageBot.Games;
 using LanguageBot.Models;
 using Microsoft.EntityFrameworkCore;
+using System.Reflection.Emit;
+using System.Text;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.ReplyMarkups;
 using static LanguageBot.Games.HangmanGame;
+using static Microsoft.EntityFrameworkCore.DbLoggerCategory;
 using Update = Telegram.Bot.Types.Update;
 
 namespace LanguageBot.Controller
@@ -174,6 +177,11 @@ namespace LanguageBot.Controller
                 case "ℹ Помощь" or "/help" or "Помощь" or "помощь":
                     await SendHelp(update.Message.Chat.Id);
                     break;
+                case "🏆 Рейтинг 🏆" or "Рейтинг" or "рейтинг" or "рейт":
+                    var ranking = await SendRating(update.Message.Chat.Id);
+                    await _botClient.SendTextMessageAsync(update.Message.Chat.Id, ranking);
+                    await SendMainMenu(update.Message.Chat.Id);
+                    break;
 
                 default:
                     // Обработка угадывания буквы
@@ -193,6 +201,34 @@ namespace LanguageBot.Controller
             }
         }
 
+        private async Task<string> SendRating(long chatId)
+        {
+            using var db = new AppDbContext();
+            var userM = await db.Users.FirstOrDefaultAsync(c => c.ChatId == chatId);
+
+            // Получаем всех пользователей с указанным уровнем
+            var users = await db.Users
+                .Where(u => u.Level == userM.Level) // Фильтруем по уровню
+                .OrderByDescending(u => u.XP) // Сортируем по XP
+                .Select(u => new
+                {
+                    u.FirstName,
+                    u.XP
+                })
+                .ToListAsync();
+
+            // Формируем текстовое представление рейтинга
+            var result = new StringBuilder($"🏆 Рейтинг пользователей уровня {userM.Level}:\n");
+            result.AppendLine($"\n📊 Уровень - {userM.Level}");
+            for (int i = 0; i < users.Count; i++)
+            {
+                var user = users[i];
+                result.AppendLine($"👤 {user.FirstName} - {user.XP} XP (Ранг: {i + 1})");
+            }
+
+            return result.ToString();
+        }
+
         private async Task SendSettings(long chatId)
         {
             var inlineKeyboard = new InlineKeyboardMarkup(new[]
@@ -205,7 +241,7 @@ namespace LanguageBot.Controller
             new[]
             {
                 InlineKeyboardButton.WithCallbackData("Поменять возраст", "age"),
-                InlineKeyboardButton.WithCallbackData("Поменять язык", "language"),
+                //InlineKeyboardButton.WithCallbackData("Поменять язык", "language"),
             }
         });
 
@@ -292,7 +328,7 @@ namespace LanguageBot.Controller
             {
                 new[] { new KeyboardButton("📖 Учить") },
                 new[] { new KeyboardButton("🎯 Игра"), new KeyboardButton("📊 Статистика") },new[] { new KeyboardButton("🎉 Достижения") },
-                new[] { new KeyboardButton("⚙ Настройки"), new KeyboardButton("ℹ Помощь") }
+                new[] { new KeyboardButton("⚙ Настройки"), new KeyboardButton("ℹ Помощь") }, new[] { new KeyboardButton("🏆 Рейтинг 🏆") }
             })
             {
                 ResizeKeyboard = true
@@ -323,7 +359,7 @@ namespace LanguageBot.Controller
                     return;
                 case "gram":
                     var lesson = await db.Lessons
-                        .FirstOrDefaultAsync(l => l.Language == language && l.Title == "Базовая грамматика");
+                        .FirstOrDefaultAsync(l => l.Title == "Базовая грамматика");
 
                     if (lesson != null)
                     {
@@ -338,7 +374,7 @@ namespace LanguageBot.Controller
                     return;
                 case "fonet":
                     var lesson1 = await db.Lessons
-                        .FirstOrDefaultAsync(l => l.Language == language && l.Title == "Базовая грамматика");
+                        .FirstOrDefaultAsync(l => l.Title == "Базовая грамматика");
 
                     if (lesson1 != null)
                     {
@@ -353,7 +389,7 @@ namespace LanguageBot.Controller
                     return;
                 case "readlis":
                     var lesson2 = await db.Lessons
-                    .FirstOrDefaultAsync(l => l.Language == language && l.Title == "Чтение и аудирование");
+                    .FirstOrDefaultAsync(l => l.Title == "Чтение и аудирование");
 
                     if (lesson2 != null)
                     {
@@ -368,7 +404,7 @@ namespace LanguageBot.Controller
                     return;
                 case "talk":
                     var lesson3 = await db.Lessons
-                    .FirstOrDefaultAsync(l => l.Language == language && l.Title == "Разговорная практика");
+                    .FirstOrDefaultAsync(l => l.Title == "Разговорная практика");
 
                     if (lesson3 != null)
                     {
@@ -383,7 +419,7 @@ namespace LanguageBot.Controller
                     return;
                 case "slang":
                     var lesson4 = await db.Lessons
-                    .FirstOrDefaultAsync(l => l.Language == language && l.Title == "Сленг и идиомы");
+                    .FirstOrDefaultAsync(l => l.Title == "Сленг и идиомы");
 
                     if (lesson4 != null)
                     {
@@ -398,7 +434,7 @@ namespace LanguageBot.Controller
                     return;
                 case "preparation":
                     var lesson5 = await db.Lessons
-                    .FirstOrDefaultAsync(l => l.Language == language && l.Title == "Сленг и идиомы");
+                    .FirstOrDefaultAsync(l => l.Title == "Сленг и идиомы");
 
                     if (lesson5 != null)
                     {
