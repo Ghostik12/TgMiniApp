@@ -8,7 +8,7 @@ using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.ReplyMarkups;
 using static LanguageBot.Games.HangmanGame;
-using static Microsoft.EntityFrameworkCore.DbLoggerCategory;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 using Update = Telegram.Bot.Types.Update;
 
 namespace LanguageBot.Controller
@@ -16,6 +16,9 @@ namespace LanguageBot.Controller
     public class TextMessageController
     {
         private ITelegramBotClient _botClient { get; set; }
+        private string[] validLevels = new[] { "A1", "A2", "B1", "B2", "C1", "C2" };
+        private int pageNumber = 1;
+        private int pageSize = 1;
 
         public TextMessageController(ITelegramBotClient botClient)
         {
@@ -74,6 +77,11 @@ namespace LanguageBot.Controller
                         state.UserData.Language = "Русский";
                     else
                         state.UserData.Language = parts[3];
+                    if (!validLevels.Contains(parts[4]))
+                    {
+                        await _botClient.SendTextMessageAsync(chatId, "Недопустимый уровень. Допустимые уровни: A1, A2, B1, B2, C1, C2");
+                        return;
+                    }
                     state.UserData.Level = parts[4];
 
                     await CompleteRegistration(chatId);
@@ -178,8 +186,8 @@ namespace LanguageBot.Controller
                     await SendHelp(update.Message.Chat.Id);
                     break;
                 case "🏆 Рейтинг 🏆" or "Рейтинг" or "рейтинг" or "рейт":
-                    var ranking = await SendRating(update.Message.Chat.Id);
-                    await _botClient.SendTextMessageAsync(update.Message.Chat.Id, ranking);
+                    var ranking = await SendRating(update.Message.Chat.Id, pageNumber);
+                    await _botClient.SendTextMessageAsync(update.Message.Chat.Id, ranking.Ranking, replyMarkup: ranking.Keyboard);
                     await SendMainMenu(update.Message.Chat.Id);
                     break;
 
@@ -201,7 +209,7 @@ namespace LanguageBot.Controller
             }
         }
 
-        private async Task<string> SendRating(long chatId)
+        private async Task<(string Ranking, InlineKeyboardMarkup Keyboard)> SendRating(long chatId, int pageNumber)
         {
             using var db = new AppDbContext();
             var userM = await db.Users.FirstOrDefaultAsync(c => c.ChatId == chatId);
@@ -217,16 +225,49 @@ namespace LanguageBot.Controller
                 })
                 .ToListAsync();
 
+            var totalPages = (int)Math.Ceiling(users.Count / (double)pageSize);
+
+            if (pageNumber < 1 || pageNumber > totalPages)
+            {
+                return ("Недопустимый номер страницы.", null);
+            }
+
+            var pagedUsers = users
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
+                .ToList();
+
             // Формируем текстовое представление рейтинга
             var result = new StringBuilder($"🏆 Рейтинг пользователей уровня {userM.Level}:\n");
             result.AppendLine($"\n📊 Уровень - {userM.Level}");
-            for (int i = 0; i < users.Count; i++)
+            for (int i = 0; i < pagedUsers.Count; i++)
             {
-                var user = users[i];
-                result.AppendLine($"👤 {user.FirstName} - {user.XP} XP (Ранг: {i + 1})");
+                var user = pagedUsers[i];
+                var rank = (pageNumber - 1) * pageSize + i + 1; // Общий ранг
+                result.AppendLine($"👤 {user.FirstName} - {user.XP} XP (Ранг: {rank})");
             }
 
-            return result.ToString();
+            var keyboard = new List<InlineKeyboardButton[]>();
+
+            if (pageNumber > 1)
+            {
+                keyboard.Add(new[]
+                {
+            InlineKeyboardButton.WithCallbackData("⬅️ Назад", $"rating_{userM.Level}_{pageNumber - 1}")
+        });
+            }
+
+            if (pageNumber < totalPages)
+            {
+                keyboard.Add(new[]
+                {
+            InlineKeyboardButton.WithCallbackData("Вперед ➡️", $"rating_{userM.Level}_{pageNumber + 1}")
+        });
+            }
+
+            var inlineKeyboard = new InlineKeyboardMarkup(keyboard);
+
+            return (result.ToString(), inlineKeyboard);
         }
 
         private async Task SendSettings(long chatId)
@@ -344,13 +385,25 @@ namespace LanguageBot.Controller
         {
             var chatId = callbackQuery.Message.Chat.Id;
             var callbackData = callbackQuery.Data;
-            var userName = callbackQuery.From.Username;
+            //var userName = callbackQuery.From.Username;
             using AppDbContext db = new();
             var userG = await db.Users.FirstOrDefaultAsync(c => c.ChatId == chatId);
             var language = userG.Language;
             var level = userG.Level;
+            var parts = callbackData.Split('_');
+            if (parts.Length == 3 && parts[0] == "rating") 
+            {
+                var levelPart = parts[1];
+                var pageNumber = int.Parse(parts[2]);
+                var (ranking, keyboard) = await SendRating(chatId, pageNumber);// Получаем рейтинг по уровню с пагинацией
+                await _botClient.EditMessageTextAsync(// Редактируем сообщение с новым рейтингом и кнопками
+                    chatId,
+                    callbackQuery.Message.MessageId,
+                    ranking,
+                    replyMarkup: keyboard);
+            }
 
-            Console.WriteLine($"Обработка CallbackQuery: {callbackData}");
+                Console.WriteLine($"Обработка CallbackQuery: {callbackData}");
 
             switch (callbackData)
             {

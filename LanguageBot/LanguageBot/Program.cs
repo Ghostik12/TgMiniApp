@@ -4,8 +4,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using LanguageBot.Controller;
 using LanguageBot.Games;
-using LanguageBot.DB;
-using Microsoft.EntityFrameworkCore;
 
 namespace LanguageBot
 {
