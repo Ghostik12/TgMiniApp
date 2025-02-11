@@ -2,13 +2,11 @@
 using LanguageBot.Games;
 using LanguageBot.Models;
 using Microsoft.EntityFrameworkCore;
-using System.Reflection.Emit;
 using System.Text;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.ReplyMarkups;
 using static LanguageBot.Games.HangmanGame;
-using static System.Runtime.InteropServices.JavaScript.JSType;
 using Update = Telegram.Bot.Types.Update;
 
 namespace LanguageBot.Controller
@@ -209,7 +207,7 @@ namespace LanguageBot.Controller
             }
         }
 
-        private async Task<(string Ranking, InlineKeyboardMarkup Keyboard)> SendRating(long chatId, int pageNumber)
+        private async Task<(string Ranking, InlineKeyboardMarkup? Keyboard)> SendRating(long chatId, int pageNumber)
         {
             using var db = new AppDbContext();
             var userM = await db.Users.FirstOrDefaultAsync(c => c.ChatId == chatId);
@@ -238,8 +236,8 @@ namespace LanguageBot.Controller
                 .ToList();
 
             // Формируем текстовое представление рейтинга
-            var result = new StringBuilder($"🏆 Рейтинг пользователей уровня {userM.Level}:\n");
-            result.AppendLine($"\n📊 Уровень - {userM.Level}");
+            var result = new StringBuilder($"🏆 Рейтинг пользователей уровня {userM?.Level}:\n");
+            result.AppendLine($"\n📊 Уровень - {userM?.Level}");
             for (int i = 0; i < pagedUsers.Count; i++)
             {
                 var user = pagedUsers[i];
@@ -253,16 +251,16 @@ namespace LanguageBot.Controller
             {
                 keyboard.Add(new[]
                 {
-            InlineKeyboardButton.WithCallbackData("⬅️ Назад", $"rating_{userM.Level}_{pageNumber - 1}")
-        });
+                    InlineKeyboardButton.WithCallbackData("⬅️ Назад", $"rating_{userM.Level}_{pageNumber - 1}")
+                });
             }
 
             if (pageNumber < totalPages)
             {
                 keyboard.Add(new[]
                 {
-            InlineKeyboardButton.WithCallbackData("Вперед ➡️", $"rating_{userM.Level}_{pageNumber + 1}")
-        });
+                    InlineKeyboardButton.WithCallbackData("Вперед ➡️", $"rating_{userM.Level}_{pageNumber + 1}")
+                });
             }
 
             var inlineKeyboard = new InlineKeyboardMarkup(keyboard);
@@ -323,6 +321,7 @@ namespace LanguageBot.Controller
             new[]
             {
                 InlineKeyboardButton.WithCallbackData("Виселица", "hangman"),
+                InlineKeyboardButton.WithCallbackData("Анки", "anki_1"),
             }
         });
             await _botClient.SendTextMessageAsync(
@@ -391,6 +390,8 @@ namespace LanguageBot.Controller
             var language = userG.Language;
             var level = userG.Level;
             var parts = callbackData.Split('_');
+            var action = parts[0];//Действие 
+            var value = parts[1];//Значение
             if (parts.Length == 3 && parts[0] == "rating") 
             {
                 var levelPart = parts[1];
@@ -402,6 +403,21 @@ namespace LanguageBot.Controller
                     ranking,
                     replyMarkup: keyboard);
             }
+            else if(action == "prev" || action == "next" || action == "anki")
+            {
+                // Навигация по словам
+                var index = int.Parse(value);
+                await StartAnki(chatId, index, language);
+            }
+            else if(action == "add")
+            {
+                // Добавление слова в словарь пользователя
+                var wordId = int.Parse(value);
+                await AddWordToUserDictionaryAsync(chatId, wordId);
+
+                // Уведомляем пользователя
+                await _botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "Слово добавлено в словарь!");
+            }
 
                 Console.WriteLine($"Обработка CallbackQuery: {callbackData}");
 
@@ -410,6 +426,10 @@ namespace LanguageBot.Controller
                 case "hangman":
                     await StartHangmanGame(chatId);
                     return;
+                //case "anki_1":
+                //    var index = int.Parse(value);
+                //    await StartAnki(chatId, index, language);
+                //    return;
                 case "gram":
                     var lesson = await db.Lessons
                         .FirstOrDefaultAsync(l => l.Title == "Базовая грамматика");
@@ -539,6 +559,32 @@ namespace LanguageBot.Controller
             }
         }
 
+        private async Task AddWordToUserDictionaryAsync(long chatId, int wordId)
+        {
+            using var db = new AppDbContext();
+
+            // Проверяем, что слово существует
+            var word = await db.Words.FindAsync(wordId);
+            if (word == null)
+            {
+                throw new Exception("Слово не найдено.");
+            }
+
+            // Добавляем слово в словарь пользователя
+            var userWord = new DictionaryWords
+            {
+                UserID = chatId,
+                OriginalWord = word.Text,
+                TranslatedWord = word.Translation,
+                AddedDate = DateTime.UtcNow,
+                NextReviewDate = DateTime.UtcNow.AddDays(1), // Первый повтор через 1 день
+                ReviewInterval = 1 // Начальный интервал
+            };
+
+            db.DictionaryWord.Add(userWord);
+            await db.SaveChangesAsync();
+        }
+
         private async Task HandleHangmanGuess(long chatId, char letter)
         {
             if (!HangmanGames.Games.ContainsKey(chatId))
@@ -594,6 +640,53 @@ namespace LanguageBot.Controller
             HangmanGames.Games[chatId] = new HangmanGame(word, _botClient);
 
             await _botClient.SendTextMessageAsync(chatId, $"Игра началась! Угадайте слово Из {word.Length} букв\n{HangmanGames.Games[chatId].GetCurrentState()}\n");
+        }
+        public async Task StartAnki(long chatId, int index, string language)
+        {
+            try
+            {
+                // Получаем слово по индексу
+                var (word, currentIndex, total) = await GetWordAsync(index, language);
+
+                // Формируем сообщение
+                var message = $"🔤 Слово: {word.Text}\n📖 Перевод: {word.Translation}";
+
+                // Создаем кнопки
+                var keyboard = new InlineKeyboardMarkup(new[]
+                {
+            new[]
+            {
+                InlineKeyboardButton.WithCallbackData("⬅️ Предыдущее", $"prev_{currentIndex - 1}"),
+                InlineKeyboardButton.WithCallbackData("Добавить в словарь", $"add_{word.Id}"),
+                InlineKeyboardButton.WithCallbackData("Следующее ➡️", $"next_{currentIndex + 1}")
+            }
+        });
+
+                // Отправляем сообщение с кнопками
+                await _botClient.SendTextMessageAsync(chatId, message, replyMarkup: keyboard);
+            }
+            catch (Exception ex)
+            {
+                await _botClient.SendTextMessageAsync(chatId, $"Ошибка: {ex.Message}");
+            }
+        }
+
+        private async Task<(Word word, int currentIndex, object total)> GetWordAsync(int index, string language)
+        {
+            using var db = new AppDbContext();
+
+            // Получаем все слова из базы данных
+            var words = await db.Words.Where(w => w.Language == language).OrderBy(w => w.Id).ToListAsync();
+
+            if (!words.Any())
+            {
+                throw new Exception("Словарь пуст.");
+            }
+
+            // Определяем текущее слово
+            var word = words[index % words.Count]; // Циклическая навигация
+
+            return (word, index, words.Count);
         }
 
         public class RegistrationStates

@@ -19,7 +19,7 @@ namespace LanguageBot.Games
             _guessedLetters = new List<char>();
             _botClient = botClient;
         }
-
+        
         // Метод для угадывания буквы
         public string Guess(char letter)
         {

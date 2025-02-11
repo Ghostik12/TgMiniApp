@@ -28,7 +28,7 @@ namespace LanguageBot
 
             Console.WriteLine("Бот запущен");
         }
-        [Obsolete]
+
         async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
         {
             if (update.Type == UpdateType.CallbackQuery)

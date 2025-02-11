@@ -10,6 +10,7 @@ namespace LanguageBot.DB
         public DbSet<Exercise> Exercises { get; set; }
         public DbSet<Achievement> Achievements { get; set; }
         public DbSet<Lesson> Lessons { get; set; }
+        public DbSet<DictionaryWords> DictionaryWord { get; set; }
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
@@ -23,6 +24,11 @@ namespace LanguageBot.DB
                 .HasOne(a => a.User)
                 .WithMany(u => u.Achievements)
                 .HasForeignKey(a => a.UserId)
+                .HasPrincipalKey(u => u.ChatId);
+            modelBuilder.Entity<DictionaryWords>()
+                .HasOne(dw => dw.user)
+                .WithMany(u => u.DictionaryW)
+                .HasForeignKey(dw => dw.UserID)
                 .HasPrincipalKey(u => u.ChatId);
         }
     }

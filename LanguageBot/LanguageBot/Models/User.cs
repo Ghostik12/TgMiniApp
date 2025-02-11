@@ -14,5 +14,6 @@ namespace LanguageBot.Models
         public string Level { get; set; }
         public int XP { get; set; } = 0;
         public List<Achievement> Achievements { get; set; } = new();
+        public List<DictionaryWords> DictionaryW { get; set; } = new();
     }
 }
