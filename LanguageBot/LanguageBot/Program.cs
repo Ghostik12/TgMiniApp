@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using LanguageBot.Controller;
 using LanguageBot.Games;
+using LanguageBot.Services;
 
 namespace LanguageBot
 {
@@ -29,6 +30,7 @@ namespace LanguageBot
 
             services.AddScoped<ITelegramBotClient>(provide => new TelegramBotClient("7636151838:AAF9FcP9-WnHoE8SJmYD-bEQNEObULfsyfs"));
             services.AddHostedService<Bot>();
+            services.AddHostedService<ReviewReminderService>();
 
             services.AddScoped<HangmanGame>();
             services.AddScoped<TextMessageController>();

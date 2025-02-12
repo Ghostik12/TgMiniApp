@@ -474,6 +474,15 @@ namespace LanguageBot.Controller
             }
             else if(action == "add")
             {
+                var existingUserWord = await db.DictionaryWord
+                    .FirstOrDefaultAsync(dw => dw.Id == int.Parse(value));
+
+                if (existingUserWord != null)
+                {
+                    await _botClient.SendTextMessageAsync(chatId, "Данное слово уже добавлено в ваш словарь");
+                    return;
+
+                }
                 // Добавление слова в словарь пользователя
                 var wordId = int.Parse(value);
                 await AddWordToUserDictionaryAsync(chatId, wordId);
@@ -491,6 +500,32 @@ namespace LanguageBot.Controller
                     ranking,
                     replyMarkup: keyboard);
             }
+            else if (action == "reviewconfirm")
+            {
+                // Пользователь подтвердил повторение
+                await ReviewWordsAsync(chatId);
+                await _botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "Повторение начато!");
+            }
+            else if (action == "reviewcancel")
+            {
+                // Пользователь отказался от повторения
+                await _botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "Повторение отменено.");
+            }
+            else if (action == "reviewcorrect" || action == "reviewincorrect")
+            {
+                // Обновляем интервал повторения
+                var isCorrect = action == "reviewcorrect";
+                await UpdateWordReviewAsync(int.Parse(parts[1]), isCorrect);
+
+                // Уведомляем пользователя
+                await _botClient.AnswerCallbackQueryAsync(callbackQuery.Id, isCorrect ? "Правильно! 🎉" : "Неправильно. Попробуйте ещё раз.");
+
+                // Удаляем сообщение с кнопками
+                await _botClient.DeleteMessageAsync(chatId, callbackQuery.Message.MessageId);
+
+                // Показываем следующее слово для повторения
+                await ReviewNextWordAsync(chatId);
+            }
 
                 Console.WriteLine($"Обработка CallbackQuery: {callbackData}");
 
@@ -499,10 +534,7 @@ namespace LanguageBot.Controller
                 case "hangman":
                     await StartHangmanGame(chatId);
                     return;
-                //case "anki_1":
-                //    var index = int.Parse(value);
-                //    await StartAnki(chatId, index, language);
-                //    return;
+
                 case "gram":
                     var lesson = await db.Lessons
                         .FirstOrDefaultAsync(l => l.Title == "Базовая грамматика");
@@ -630,6 +662,107 @@ namespace LanguageBot.Controller
                     await _botClient.SendTextMessageAsync(chatId, "Введите язык(Английский, Русский, Французский):");
                     break;
             }
+        }
+
+        private async Task ReviewNextWordAsync(long chatId)
+        {
+            using var db = new AppDbContext();
+
+            // Получаем следующее слово для повторения
+            var nextWord = await db.DictionaryWord
+                .Where(uw => uw.UserID == chatId && uw.NextReviewDate <= DateTime.UtcNow)
+                .OrderBy(uw => uw.AddedDate)
+                .FirstOrDefaultAsync();
+
+            if (nextWord != null)
+            {
+                // Отправляем следующее слово
+                await ReviewWordAsync(chatId, nextWord.Id);
+            }
+            else
+            {
+                // Нет больше слов для повторения
+                await _botClient.SendTextMessageAsync(chatId, "Повторение завершено. 🎉");
+            }
+        }
+
+        private async Task UpdateWordReviewAsync(int wordId, bool isCorrect)
+        {
+            using var db = new AppDbContext();
+
+            var userWord = await db.DictionaryWord.FindAsync(wordId);
+            if (userWord == null)
+            {
+                throw new Exception("Запись не найдена.");
+            }
+
+            if (isCorrect)
+            {
+                // Увеличиваем интервал повторения
+                userWord.ReviewInterval = (int)(userWord.ReviewInterval * 1.5); // Например, умножаем на 1.5
+                userWord.NextReviewDate = DateTime.UtcNow.AddDays(userWord.ReviewInterval);
+            }
+            else
+            {
+                // Сбрасываем интервал
+                userWord.ReviewInterval = 1;
+                userWord.NextReviewDate = DateTime.UtcNow.AddDays(1);
+            }
+
+            await db.SaveChangesAsync();
+        }
+
+        private async Task ReviewWordsAsync(long userId)
+        {
+            using var db = new AppDbContext();
+
+            // Получаем слова для повторения
+            var words = await db.DictionaryWord
+                .Where(uw => uw.UserID == userId && uw.NextReviewDate <= DateTime.UtcNow)
+                .OrderBy(uw => uw.AddedDate) // Сортируем по дате добавления
+                .ToListAsync();
+
+            if (!words.Any())
+            {
+                await _botClient.SendTextMessageAsync(userId, "Нет слов для повторения.");
+                return;
+            }
+
+            // Отправляем слова по одному
+            foreach (var userWord in words)
+            {
+                await ReviewWordAsync(userId, userWord.Id);
+            }
+        }
+
+        private async Task ReviewWordAsync(long userId, int id)
+        {
+            using var db = new AppDbContext();
+
+            // Получаем слово для повторения
+            var userWord = await db.DictionaryWord
+                .FirstOrDefaultAsync(uw => uw.Id == id);
+
+            if (userWord == null)
+            {
+                await _botClient.SendTextMessageAsync(userId, "Слово не найдено.");
+                return;
+            }
+
+            // Отправляем слово и перевод
+            var message = $"🔤 Слово: {userWord.OriginalWord}\n📖 Перевод: {userWord.TranslatedWord}";
+
+            // Создаем кнопки для оценки
+            var keyboard = new InlineKeyboardMarkup(new[]
+            {
+                new[]
+                {
+                    InlineKeyboardButton.WithCallbackData("✅ Правильно", $"reviewcorrect_{userWord.Id}"),
+                    InlineKeyboardButton.WithCallbackData("❌ Неправильно", $"reviewincorrect_{userWord.Id}")
+                }
+            });
+
+            await _botClient.SendTextMessageAsync(userId, message, replyMarkup: keyboard);
         }
 
         private async Task AddWordToUserDictionaryAsync(long chatId, int wordId)
